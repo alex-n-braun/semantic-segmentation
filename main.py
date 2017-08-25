@@ -51,7 +51,6 @@ def load_vgg(sess, vgg_path):
 
 tests.test_load_vgg(load_vgg, tf)
 
-
 def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     """
     Create the layers for a fully convolutional network.  Build skip-layers using the vgg layers.
@@ -62,9 +61,20 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     :return: The Tensor for the last layer of output
     """
     # TODO: Implement function
-    return None
-#tests.test_layers(layers)
-
+    t1 = tf.layers.conv2d_transpose(vgg_layer7_out, 512, 3, strides=(2, 2), padding='same', activation=tf.nn.relu, name='t1')
+    # t1 has same dimensions as vgg_layer_4; so we can add the latter (skip connection)
+    t1 = tf.add(t1, vgg_layer4_out, name='t1_skip')
+    
+    t2 = tf.layers.conv2d_transpose(t1, 256, 3, strides=(2, 2), padding='same', activation=tf.nn.relu, name='t2')
+    # t2 has same dimensions as vgg_layer_3; so we can add the latter (skip connection)
+    t2 = tf.add(t2, vgg_layer3_out, name='t2_skip')
+    
+    t3 = tf.layers.conv2d_transpose(t2, 128, 6, strides=(2, 2), padding='same', activation=tf.nn.relu, name='t3')
+    t4 = tf.layers.conv2d_transpose(t3, 64, 12, strides=(2, 2), padding='same', activation=tf.nn.softsign, name='t4')
+    t5 = tf.layers.conv2d_transpose(t4, num_classes, 24, strides=(2, 2), padding='same', name='t5')
+    print(t1.name, t2.name, t3.name, t4.name, t5.name)
+    return t5
+tests.test_layers(layers)
 
 def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     """
@@ -76,8 +86,13 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     :return: Tuple of (logits, train_op, cross_entropy_loss)
     """
     # TODO: Implement function
-    return None, None, None
-#tests.test_optimize(optimize)
+    logits = tf.reshape(nn_last_layer, [-1, num_classes])
+    cl = tf.reshape(correct_label, [-1, num_classes])
+    cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=cl)
+    cross_entropy_loss = tf.reduce_mean(cross_entropy)
+    train_op = tf.train.AdamOptimizer(learning_rate).minimize(cross_entropy_loss)    
+    return logits, train_op, cross_entropy_loss
+tests.test_optimize(optimize)
 
 
 def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_loss, input_image,
@@ -96,8 +111,17 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
     :param learning_rate: TF Placeholder for learning rate
     """
     # TODO: Implement function
-    pass
-#tests.test_train_nn(train_nn)
+    for epoch in range(epochs):
+        batch = 0
+        for image,label in get_batches_fn(batch_size):
+            out, loss = sess.run([train_op, cross_entropy_loss], 
+                                 feed_dict={input_image: image, 
+                                            correct_label: label, 
+                                            keep_prob: 0.5, 
+                                            learning_rate: 1e-5})
+            print('Epoch ',epoch, ' Batch ',batch,' Loss ',loss)
+            batch = batch + 1
+tests.test_train_nn(train_nn)
 
 
 def run():
@@ -124,12 +148,22 @@ def run():
         #  https://datascience.stackexchange.com/questions/5224/how-to-prepare-augment-images-for-neural-network
 
         # TODO: Build NN using load_vgg, layers, and optimize function
-        load_vgg(sess, vgg_path)
+        input_tensor, keep_prob_tensor, layer3_out_tensor, layer4_out_tensor, layer7_out_tensor = load_vgg(sess, vgg_path)
+        out_tensor = layers(layer3_out_tensor, layer4_out_tensor, layer7_out_tensor, num_classes)
+        correct_label = tf.placeholder(tf.int32, [None, None, None, num_classes])
+        learning_rate = tf.placeholder(tf.float32)
+        logits, train_op, cross_entropy_loss = optimize(out_tensor, correct_label, learning_rate, num_classes)
+        sess.run(tf.global_variables_initializer())
 
         # TODO: Train NN using the train_nn function
+        epochs = 20
+        batch_size = 2
+        train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_loss, input_tensor, 
+                 correct_label, keep_prob_tensor, learning_rate)
 
         # TODO: Save inference data using helper.save_inference_samples
         #  helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image)
+        helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob_tensor, input_tensor)
 
         # OPTIONAL: Apply the trained model to a video
 
